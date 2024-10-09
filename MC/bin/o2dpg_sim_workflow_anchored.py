@@ -293,7 +293,7 @@ def main():
     parser.add_argument("--trig-eff", type=float, dest="trig_eff", help="Trigger eff needed for IR", default=-1.0)
     parser.add_argument('forward', nargs=argparse.REMAINDER) # forward args passed to actual workflow creation
     args = parser.parse_args()
-    print (args)
+    print ("<o2dpg_sim_workflow_anchored.py> arguments ", args)
 
     # split id should not be larger than production id
     assert(args.split_id <= args.prod_split)
@@ -387,6 +387,7 @@ def main():
     cmd = "${O2DPG_ROOT}/MC/bin/o2dpg_sim_workflow.py " + forwardargs
     print ("Creating time-anchored workflow...")
     os.system(cmd)
+    print ("... done!")
 
 if __name__ == "__main__":
   sys.exit(main())

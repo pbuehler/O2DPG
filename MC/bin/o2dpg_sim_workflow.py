@@ -77,7 +77,7 @@ parser.add_argument('-ptHatMax',help='pT hard maximum when no bin requested', de
 parser.add_argument('-weightPow',help='Flatten pT hard spectrum with power', default=-1)
 
 parser.add_argument('--embedding',action='store_true', help='With embedding into background')
-parser.add_argument('--embeddPattern',help='How signal is to be injected into background', default='@0:e1')
+parser.add_argument('--embeddPattern',help='How signal is to be injected into background', default='')
 parser.add_argument('-nb',help='number of background events / timeframe', default=20)
 parser.add_argument('-genBkg',help='embedding background generator', default='') #pythia8, not recomended: pythia8hi, pythia8pp
 parser.add_argument('-procBkg',help='process type: inel, ..., do not set it for Pythia8 PbPb', default='heavy_ion')
@@ -148,7 +148,7 @@ parser.add_argument('--fwdmatching-cut-4-param', action='store_true', help='appl
 parser.add_argument('--fwdmatching-save-trainingdata', action='store_true', help='enables saving parameters at plane for matching training with machine learning')
 
 args = parser.parse_args()
-print (args)
+print ("<o2dpg_sim_workflow.py> arguments ", args)
 
 # make sure O2DPG + O2 is loaded
 O2DPG_ROOT=environ.get('O2DPG_ROOT')
@@ -362,6 +362,12 @@ qcdir = "QC"
 if (includeLocalQC or includeFullQC) and not isdir(qcdir):
     mkdir(qcdir)
 
+print("<o2dpg_sim_workflow> Some embedding relevant values (input)")
+print("  embeddPattern", args.embeddPattern)
+print("  number of signal events", args.ns)
+print("  number of background events", args.nb)
+print("  interaction rate", args.interactionRate)
+
 # create/publish the GRPs and other GLO objects for consistent use further down the pipeline
 orbitsPerTF=int(args.orbitsPerTF)
 GRP_TASK = createTask(name='grpcreate', cpu='0')
@@ -375,6 +381,7 @@ if len(CONFKEYMV) > 0:
 
 workflow['stages'].append(GRP_TASK)
 
+NBKGEVENTS = 0
 if doembedding:
     if not usebkgcache:
         # ---- do background transport task -------
@@ -622,7 +629,7 @@ for tf in range(1, NTIMEFRAMES + 1):
    PbPbXSec=8. # expected PbPb cross section
    QEDXSecExpected=35237.5  # expected magnitude of QED cross section
    PreCollContextTask=createTask(name='precollcontext_' + str(tf), needs=precollneeds, tf=tf, cwd=timeframeworkdir, cpu='1')
-   PreCollContextTask['cmd']='${O2_ROOT}/bin/o2-steer-colcontexttool -i ' + signalprefix + ',' + str(INTRATE) + ',' + str(args.ns) + ':' + str(args.ns) + ' --show-context ' + ' --timeframeID ' + str(tf-1 + int(args.production_offset)*NTIMEFRAMES) + ' --orbitsPerTF ' + str(orbitsPerTF) + ' --orbits ' + str(orbitsPerTF) + ' --seed ' + str(TFSEED) + ' --noEmptyTF --first-orbit ' + str(args.first_orbit)
+   PreCollContextTask['cmd']='${O2_ROOT}/bin/o2-steer-colcontexttool -i ' + signalprefix + ',' + str(INTRATE) + ',' + str(NSIGEVENTS) + ':' + str(NSIGEVENTS) + ' --show-context ' + ' --timeframeID ' + str(tf-1 + int(args.production_offset)*NTIMEFRAMES) + ' --orbitsPerTF ' + str(orbitsPerTF) + ' --orbits ' + str(orbitsPerTF) + ' --seed ' + str(TFSEED) + ' --noEmptyTF --first-orbit ' + str(args.first_orbit)
    PreCollContextTask['cmd'] += ' --bcPatternFile ccdb'  # <--- the object should have been set in (local) CCDB
    if includeQED:
       qedrate = INTRATE * QEDXSecExpected / PbPbXSec   # hadronic interaction rate * cross_section_ratio
@@ -722,20 +729,21 @@ for tf in range(1, NTIMEFRAMES + 1):
       sgngenneeds=signalneeds + ['sgngen_' + str(tf-1)] # we serialize event generation
    SGNGENtask=createTask(name='sgngen_'+str(tf), needs=sgngenneeds, tf=tf, cwd='tf'+str(tf), lab=["GEN"],
                          cpu=1, mem=1000)
-
-   SGNGENtask['cmd']=''
+   SGNGENtask['cmd'] = ""
+   
+   # events from hepmc file
    if GENERATOR=="hepmc":
      if tf == 1:
       # determine the offset number
        eventOffset = environ.get('HEPMCOFFSET')
        print("HEPMCOFFSET: ", eventOffset)
        if eventOffset == None:
-        eventOffset = 0
+         eventOffset = 0
        cmd = 'export HEPMCEVENTSKIP=$(${O2DPG_ROOT}/UTILS/InitHepMCEventSkip.sh ../HepMCEventSkip.json ' + str(eventOffset) + ');'
      elif tf > 1:
        # determine the skip number
        cmd = 'export HEPMCEVENTSKIP=$(${O2DPG_ROOT}/UTILS/ReadHepMCEventSkip.sh ../HepMCEventSkip.json ' + str(tf) + ');'
-     SGNGENtask['cmd'] = cmd
+     SGNGENtask['cmd'] += cmd
    SGNGENtask['cmd'] +='${O2_ROOT}/bin/o2-sim --noGeant -j 1 --field ccdb --vertexMode kCCDB'         \
                      + ' --run ' + str(args.run) + ' ' + str(CONFKEY) + str(TRIGGER)                  \
                      + ' -g ' + str(GENERATOR) + ' ' + str(INIFILE) + ' -o genevents ' + embeddinto   \
@@ -885,7 +893,7 @@ for tf in range(1, NTIMEFRAMES + 1):
    ContextTask = createTask(name='digicontext_'+str(tf), needs=contextneeds, tf=tf, cwd=timeframeworkdir, lab=["DIGI"], cpu='1')
    # this is just to have the digitizer ini file
    ContextTask['cmd'] = '${O2_ROOT}/bin/o2-sim-digitizer-workflow --only-context --interactionRate ' + str(INTRATE) \
-                        + ' ' + getDPL_global_options(ccdbbackend=False) + ' -n ' + str(args.ns) + simsoption       \
+                        + ' ' + getDPL_global_options(ccdbbackend=False) + ' -n ' + str(NSIGEVENTS) + simsoption       \
                         + ' --seed ' + str(TFSEED)                                                                  \
                         + ' ' + putConfigValuesNew({"DigiParams.maxOrbitsToDigitize" : str(orbitsPerTF)},{"DigiParams.passName" : str(PASSNAME)}) + ('',' --incontext ' + CONTEXTFILE)[args.pregenCollContext] + QEDdigiargs
    ContextTask['cmd'] += ' --bcPatternFile ccdb'
@@ -893,7 +901,12 @@ for tf in range(1, NTIMEFRAMES + 1):
    # in case of embedding we engineer the context directly and allow the user to provide an embedding pattern
    # The :r flag means to shuffle the background events randomly
    if doembedding:
-      ContextTask['cmd'] += ';ln -nfs ../bkg_Kine.root .;${O2_ROOT}/bin/o2-steer-colcontexttool -i bkg,' + str(INTRATE) + ',' + str(args.ns) + ':' + str(args.nb) + ' ' + signalprefix + ',' + args.embeddPattern + ' --show-context ' + ' --timeframeID ' + str(tf-1 + int(args.production_offset)*NTIMEFRAMES) + ' --orbitsPerTF ' + str(orbitsPerTF) + ' --use-existing-kine'
+      if args.embeddPattern == '':
+        cmd = ";. ${O2DPG_ROOT}/UTILS/ComputeNumberOfEvents.sh " + str(tf) + " " + str(INTRATE) + " " + str(orbitsPerTF) + " " + str(TFSEED) + " " + str(NSIGEVENTS) + " " + str(NBKGEVENTS) + ';'
+      else:
+        cmd = ';export EMBEDDPATTERN_TF' + str(tf) + '=bkg,' + str(INTRATE) + ',' + str(NBKGEVENTS) + ':' + str(NBKGEVENTS) +' ' + signalprefix + ',' + args.embeddPattern + ';'
+      ContextTask['cmd'] += cmd
+      ContextTask['cmd'] += 'ln -nfs ../bkg_Kine.root .;${O2_ROOT}/bin/o2-steer-colcontexttool -i ${EMBEDDPATTERN_TF' + str(tf) + '} --show-context ' + ' --timeframeID ' + str(tf-1 + int(args.production_offset)*NTIMEFRAMES) + ' --orbitsPerTF ' + str(orbitsPerTF) + ' --use-existing-kine'
       ContextTask['cmd'] += ' --bcPatternFile ccdb --seed ' + str(TFSEED) + ' --orbits ' + str(orbitsPerTF) + ' --noEmptyTF --first-orbit ' + str(args.first_orbit)
 
    workflow['stages'].append(ContextTask)
@@ -925,7 +938,7 @@ for tf in range(1, NTIMEFRAMES + 1):
    TPCDigitask=createTask(name='tpcdigi_'+str(tf), needs=tpcdigineeds,
                           tf=tf, cwd=timeframeworkdir, lab=["DIGI"], cpu=NWORKERS_TF, mem=str(tpcdigimem))
    TPCDigitask['cmd'] = ('','ln -nfs ../bkg_HitsTPC.root . ;')[doembedding]
-   TPCDigitask['cmd'] += '${O2_ROOT}/bin/o2-sim-digitizer-workflow ' + getDPL_global_options() + ' -n ' + str(args.ns) + simsoption       \
+   TPCDigitask['cmd'] += '${O2_ROOT}/bin/o2-sim-digitizer-workflow ' + getDPL_global_options() + ' -n ' + str(NSIGEVENTS) + simsoption       \
                          + ' --onlyDet TPC --TPCuseCCDB --interactionRate ' + str(INTRATE) + '  --tpc-lanes ' + str(NWORKERS_TF)             \
                          + ' --incontext ' + str(CONTEXTFILE) + ' --disable-write-ini --early-forward-policy always --forceSelectedDets ' \
                          + ' --tpc-distortion-type ' + str(tpcDistortionType)                                                             \
@@ -945,7 +958,7 @@ for tf in range(1, NTIMEFRAMES + 1):
    TRDDigitask=createTask(name='trddigi_'+str(tf), needs=trddigineeds,
                           tf=tf, cwd=timeframeworkdir, lab=["DIGI"], cpu=NWORKERS_TF, mem='8000')
    TRDDigitask['cmd'] = ('','ln -nfs ../bkg_HitsTRD.root . ;')[doembedding]
-   TRDDigitask['cmd'] += '${O2_ROOT}/bin/o2-sim-digitizer-workflow ' + getDPL_global_options() + ' -n ' + str(args.ns) + simsoption         \
+   TRDDigitask['cmd'] += '${O2_ROOT}/bin/o2-sim-digitizer-workflow ' + getDPL_global_options() + ' -n ' + str(NSIGEVENTS) + simsoption         \
                          + ' --onlyDet TRD --interactionRate ' + str(INTRATE) + ' --incontext ' + str(CONTEXTFILE) + ' --disable-write-ini' \
                          + putConfigValuesNew(localCF={"TRDSimParams.digithreads" : NWORKERS_TF, "DigiParams.seed" : str(TFSEED)}) + " --forceSelectedDets"
    TRDDigitask['cmd'] += ('',' --disable-mc')[args.no_mc_labels]
@@ -956,7 +969,7 @@ for tf in range(1, NTIMEFRAMES + 1):
       tneeds =[ContextTask['name']]
       if includeQED == True:
         tneeds += [QED_task['name']]
-      commondigicmd = '${O2_ROOT}/bin/o2-sim-digitizer-workflow ' + getDPL_global_options() + ' -n ' + str(args.ns) + simsoption \
+      commondigicmd = '${O2_ROOT}/bin/o2-sim-digitizer-workflow ' + getDPL_global_options() + ' -n ' + str(NSIGEVENTS) + simsoption \
                       + ' --interactionRate ' + str(INTRATE) + '  --incontext ' + str(CONTEXTFILE) + ' --disable-write-ini'      \
                       + putConfigValuesNew(["MFTAlpideParam", "ITSAlpideParam", "ITSDigitizerParam"],
                                            localCF={"DigiParams.seed" : str(TFSEED), "MCHDigitizer.seed" : str(TFSEED)}) + QEDdigiargs
@@ -1007,7 +1020,7 @@ for tf in range(1, NTIMEFRAMES + 1):
    FT0FV0EMCCTPDIGItask = createTask(name="ft0fv0emcctp_digi_" + str(tf), needs=tneeds,
                   tf=tf, cwd=timeframeworkdir, lab=["DIGI","SMALLDIGI"], cpu='1')
    FT0FV0EMCCTPDIGItask['cmd'] = ('','ln -nfs ../bkg_HitsFT0.root . ; ln -nfs ../bkg_HitsFV0.root . ;')[doembedding]
-   FT0FV0EMCCTPDIGItask['cmd'] += '${O2_ROOT}/bin/o2-sim-digitizer-workflow ' + getDPL_global_options() + ' -n ' + str(args.ns) + simsoption \
+   FT0FV0EMCCTPDIGItask['cmd'] += '${O2_ROOT}/bin/o2-sim-digitizer-workflow ' + getDPL_global_options() + ' -n ' + str(NSIGEVENTS) + simsoption \
                + ' --onlyDet FT0,FV0,EMC,CTP  --interactionRate ' + str(INTRATE) + '  --incontext ' + str(CONTEXTFILE)    \
                + ' --disable-write-ini' + putConfigValuesNew(localCF={"DigiParams.seed" : str(TFSEED)})                   \
                + (' --combine-devices','')[args.no_combine_dpl_devices] + ('',' --disable-mc')[args.no_mc_labels] + QEDdigiargs \
