@@ -385,9 +385,8 @@ def main():
                    + str(GLOparams["FirstOrbit"]) + " -field ccdb -bcPatternFile ccdb" + " --orbitsPerTF " + str(GLOparams["OrbitsPerTF"]) + " -col " + str(ColSystem) + " -eCM " + str(eCM) + ' --readoutDets ' + GLOparams['detList']
     print ("forward args ", forwardargs)
     cmd = "${O2DPG_ROOT}/MC/bin/o2dpg_sim_workflow.py " + forwardargs
-    print ("Creating time-anchored workflow...")
+    print ("Creating workflow...")
     os.system(cmd)
-    print ("... done!")
 
 if __name__ == "__main__":
   sys.exit(main())
